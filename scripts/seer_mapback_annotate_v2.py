@@ -9,7 +9,8 @@ parser.add_argument("-k", "--kmers", help="Kmers file, filtered output from SEER
 parser.add_argument("-s", "--assembly", help="File containing two columns: strain and location of assembly (required)", required=True)
 parser.add_argument("-a", "--annot", help="File containing two columns: strain and location of GFF files (optional)", required=False)
 parser.add_argument("-o", "--outprefix", help="Output file prefix (required)", required=True)
-parser.add_argument("-f", "--filter_pval", help="Filter out kmers with an adjusted p-value (Wald) above this threshold (default = 1, do not filter)", required=False, default=1)
+parser.add_argument("-v", "--pvalue", help="Use Wald (continuous data, 0) or LTR (binary data, 1) p-values", required=False, default=0)
+parser.add_argument("-f", "--filter_pval", help="Filter out kmers with an adjusted p-value (from the one selected with -v) above this threshold (default = 1, do not filter)", required=False, default=1)
 parser.add_argument("-m", "--max", help="Maximum number of gff files to look at for annotating a kmer (optional, default = 5)", required=False, default=5)
 parser.add_argument("-l", "--list", help="File containing a list of strain names with good annotations to always keep (must be same name as the first column in -s and -a) (optional)", required=False)
 parser.add_argument("-c", "--column", help="Column number where the list of strains containing a kmer starts (optional, default = 8)", required=False, default=8)
@@ -268,6 +269,8 @@ with open(arg.kmers, 'r') as KMERS:
 		kmer = linesplit[0]
 		maf = linesplit[1]
 		p_adj = float(linesplit[3])
+		if int(arg.pvalue) == 1:
+			p_adj = float(linesplit[4])
 		beta = linesplit[5]
 		ranStrains = []
 		if p_adj <= float(arg.filter_pval):
@@ -380,16 +383,16 @@ with open(outfile, 'w') as OUT:
 			OUT.write(result)
 
 # Create summary file if requested #
-if arg.summary is True:
+if arg.summary is True:		#arg.summary
 	kmerinfo = {}
 	for entry in outputDic:
-		geneinfo = []
-		productinfo = [] 
-		kmerList = outputDic[entry]
-		for k in kmerList:
-			linesplit = k.rstrip().split('\t')
-			kmer = linesplit[0]
-			if 'NNN' not in kmer:
+		if 'NNN' not in entry:
+			geneinfo = []
+			productinfo = []
+			kmerList = outputDic[entry]
+			for k in kmerList:
+				linesplit = k.rstrip().split('\t')
+				kmer = linesplit[0]
 				maf = linesplit[1]
 				wald = linesplit[2]
 				score = linesplit[3]
@@ -404,50 +407,54 @@ if arg.summary is True:
 				l = '\t'.join(l)
 				geneinfo.append(gene)
 				productinfo.append(annot)
-		# Summarize gene and product info for this kmer #
-		finalgene = ''
-		finalannot = ''
-		# Gene #
-		geneclean = [x.split('_')[0] for x in geneinfo]
-		geneclean = [x for x in geneclean if x is not '']
-		if len(geneclean)>0:
-			uniq = list(set(geneclean))
+			# Summarize gene and product info for this kmer #
+			finalgene = ''
+			finalannot = ''
+			# Gene #
+			geneclean = [x.split('_')[0] for x in geneinfo]
+			geneclean = [x for x in geneclean if x is not '']
+			if len(geneclean)>0:
+				uniq = list(set(geneclean))
+				if len(uniq)==1:
+					finalgene = uniq[0]
+				else:
+					# count how many of each #
+					howmany = {}
+					for x in uniq:
+						hmany = geneclean.count(x)
+						howmany[x] = hmany
+					maxvalue = sorted(howmany.values())
+					#if len(maxvalue)-1 < len(maxvalue) or len(maxvalue)-1 > len(maxvalue):
+					#	raise Exception('Stopped in '+entry)
+					maxvalue = maxvalue[len(maxvalue)-1]
+					selgenes = [x for x in howmany if howmany[x]==maxvalue]
+					if len(selgenes)==1:
+						# if there is an option with a maximum number #
+						finalgene = selgenes[0]
+					else:
+						finalgene = ','.join(selgenes)
+			# Annotation #
+			uniq = list(set(productinfo))
 			if len(uniq)==1:
-				finalgene = uniq[0]
+				finalannot = uniq[0]
 			else:
 				# count how many of each #
 				howmany = {}
 				for x in uniq:
-					hmany = geneclean.count(x)
+					hmany = productinfo.count(x)
 					howmany[x] = hmany
 				maxvalue = sorted(howmany.values())
+				#if len(maxvalue)-1 < len(maxvalue) or len(maxvalue)-1 > len(maxvalue):
+				#		raise Exception('Stopped in '+entry)
 				maxvalue = maxvalue[len(maxvalue)-1]
-				selgenes = [x for x in howmany if howmany[x]==maxvalue]
-				if len(selgenes)==1:
+				selannot = [x for x in howmany if howmany[x]==maxvalue]
+				if len(selannot)==1:
 					# if there is an option with a maximum number #
-					finalgene = selgenes[0]
+					finalannot = selannot[0]
 				else:
-					finalgene = ','.join(selgenes)
-		# Annotation #
-		uniq = list(set(productinfo))
-		if len(uniq)==1:
-			finalannot = uniq[0]
-		else:
-			# count how many of each #
-			howmany = {}
-			for x in uniq:
-				hmany = productinfo.count(x)
-				howmany[x] = hmany
-			maxvalue = sorted(howmany.values())
-			maxvalue = maxvalue[len(maxvalue)-1]
-			selannot = [x for x in howmany if howmany[x]==maxvalue]
-			if len(selannot)==1:
-				# if there is an option with a maximum number #
-				finalannot = selannot[0]
-			else:
-				finalannot = ','.join(selannot)
-		l = l+'\t'+finalgene+'\t'+finalannot
-		kmerinfo[kmer] = l
+					finalannot = ','.join(selannot)
+			l = l+'\t'+finalgene+'\t'+finalannot
+			kmerinfo[kmer] = l
 
 	# Write output file #
 	outfile = arg.outprefix+'_mapback_summary.tsv'
